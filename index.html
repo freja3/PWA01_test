@@ -3,70 +3,145 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP Temp Monitor</title>
+    <title>ESP Pro Monitor v2</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root { --bg: #f0f2f5; --card: #ffffff; --primary: #3498db; --text: #2c3e50; }
-        body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-        .container { width: 100%; max-width: 400px; }
-        h1 { font-size: 1.5rem; text-align: center; }
-        .status-badge { font-size: 0.8rem; padding: 5px 12px; border-radius: 20px; background: #dfe6e9; display: inline-block; margin-bottom: 20px; }
-        #sensor-container { display: grid; gap: 10px; width: 100%; }
-        .card { background: var(--card); padding: 15px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
-        .card .name { font-weight: bold; }
-        .card .value { font-size: 1.2rem; color: var(--primary); font-weight: bold; }
-        button { width: 100%; background: var(--primary); color: white; border: none; padding: 15px; border-radius: 12px; font-size: 1rem; font-weight: bold; margin-top: 20px; cursor: pointer; }
+        :root { --bg: #0f172a; --card: #1e293b; --primary: #38bdf8; --text: #f8fafc; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 15px; }
+        .container { width: 100%; max-width: 600px; margin: 0 auto; }
+        .status-badge { font-size: 0.7rem; padding: 4px 10px; border-radius: 10px; background: #334155; margin-bottom: 15px; display: inline-block; }
+        
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 20px; }
+        .card { background: var(--card); padding: 12px; border-radius: 12px; border: 1px solid #334155; text-align: center; }
+        .card .label { font-size: 0.7rem; color: #94a3b8; display: block; }
+        .card .val { font-size: 1.2rem; font-weight: bold; color: var(--primary); }
+        
+        .chart-container { background: var(--card); padding: 15px; border-radius: 12px; margin-bottom: 20px; height: 300px; border: 1px solid #334155; }
+        
+        .nerd-box { background: #000; padding: 10px; border-radius: 8px; font-family: monospace; font-size: 0.7rem; color: #4ade80; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; color: #94a3b8; border-bottom: 1px solid #334155; padding: 5px; }
+        td { padding: 5px; border-bottom: 1px solid #1e293b; }
+        
+        button { width: 100%; background: var(--primary); color: #0f172a; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-bottom: 10px; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h1>Termometer Panel</h1>
-        <center><div id="status" class="status-badge">Forbinder...</div></center>
-        <div id="sensor-container"></div>
-        <button onclick="fetchAllSensors()">Opdater Temperaturer</button>
+<div class="container">
+    <div style="text-align: center;">
+        <div id="status" class="status-badge">Initialiserer system...</div>
     </div>
 
-    <script>
-        const sensorNames = ['DS18B20-1', 'DS18B20-2', 'DS18B20-3', 'DS18B20-4', 'DS18B20-5'];
-        const espIp = '192.168.1.66';
+    <div class="grid" id="live-cards"></div>
 
-        async function fetchAllSensors() {
-            const statusEl = document.getElementById('status');
-            const container = document.getElementById('sensor-container');
-            
-            statusEl.innerText = "Henter data...";
-            let htmlBuffer = "";
+    <div class="chart-container">
+        <canvas id="tempChart"></canvas>
+    </div>
 
-            for (const name of sensorNames) {
-                try {
-                    // Vi bruger den præcise URL som ESPHome vil have
-                    const response = await fetch(`http://${espIp}/sensor/${name}`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        htmlBuffer += `
-                            <div class="card">
-                                <span class="name">${name}</span>
-                                <span class="value">${data.value} °C</span>
-                            </div>
-                        `;
-                    }
-                } catch (error) {
-                    console.error("Fejl ved " + name, error);
+    <button onclick="updateData()">Opdater Manuelt</button>
+    <button onclick="clearHistory()" style="background: #ef4444; font-size: 0.7rem; padding: 5px;">Nulstil Historik</button>
+
+    <div class="nerd-box">
+        <table>
+            <thead><tr><th>Sensor</th><th>Min</th><th>Max</th><th>Avg</th><th>Δ (Sving)</th></tr></thead>
+            <tbody id="nerd-body"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const sensorNames = ['DS18B20-1', 'DS18B20-2', 'DS18B20-3', 'DS18B20-4', 'DS18B20-5'];
+    const espIp = '192.168.1.66';
+    
+    // Hent historik fra LocalStorage eller start forfra
+    let history = JSON.parse(localStorage.getItem('esp_history')) || {};
+    sensorNames.forEach(name => { if(!history[name]) history[name] = []; });
+
+    // Chart.js Opsætning
+    const ctx = document.getElementById('tempChart').getContext('2d');
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: Array.from({length: 30}, (_, i) => i),
+            datasets: sensorNames.map((name, i) => ({
+                label: name,
+                data: history[name].map(p => p.v),
+                borderColor: `hsl(${i * 60}, 70%, 50%)`,
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.3
+            }))
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { 
+                y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
+                x: { display: false }
+            },
+            plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 10 } } }
+        }
+    });
+
+    async function updateData() {
+        const statusEl = document.getElementById('status');
+        const cardContainer = document.getElementById('live-cards');
+        const nerdBody = document.getElementById('nerd-body');
+        
+        statusEl.innerText = "Henter data...";
+        let cardsHtml = "";
+        let nerdHtml = "";
+        const timestamp = new Date().toLocaleTimeString();
+
+        for (const name of sensorNames) {
+            try {
+                const res = await fetch(`http://${espIp}/sensor/${encodeURIComponent(name)}`);
+                const data = await res.json();
+                const val = parseFloat(data.value);
+
+                if (!isNaN(val)) {
+                    // Gem data
+                    history[name].push({ t: timestamp, v: val });
+                    if (history[name].length > 100) history[name].shift(); // Behold de sidste 100
+
+                    // Beregn Stats
+                    const vals = history[name].map(p => p.v);
+                    const min = Math.min(...vals).toFixed(1);
+                    const max = Math.max(...vals).toFixed(1);
+                    const avg = (vals.reduce((a,b) => a+b, 0) / vals.length).toFixed(1);
+                    const diff = (max - min).toFixed(1);
+
+                    cardsHtml += `<div class="card"><span class="label">${name}</span><span class="val">${val}°</span></div>`;
+                    nerdHtml += `<tr><td>${name}</td><td>${min}°</td><td>${max}°</td><td>${avg}°</td><td>${diff}°</td></tr>`;
                 }
-            }
-
-            if (htmlBuffer === "") {
-                statusEl.innerText = "Fejl: Ingen kontakt til ESP";
-                statusEl.style.background = "#ff7675";
-            } else {
-                container.innerHTML = htmlBuffer;
-                statusEl.innerText = "Opdateret: " + new Date().toLocaleTimeString('da-DK');
-                statusEl.style.background = "#55efc4";
-            }
+            } catch (e) { console.error(e); }
         }
 
-        // Kør med det samme når siden lander
-        window.onload = fetchAllSensors;
-    </script>
+        // Gem til telefonens hukommelse
+        localStorage.setItem('esp_history', JSON.stringify(history));
+
+        // Opdater Graf
+        sensorNames.forEach((name, i) => {
+            chart.data.datasets[i].data = history[name].map(p => p.v);
+        });
+        chart.update('none');
+
+        cardContainer.innerHTML = cardsHtml;
+        nerdBody.innerHTML = nerdHtml;
+        statusEl.innerText = "Live: " + timestamp;
+    }
+
+    function clearHistory() {
+        if(confirm("Vil du slette gemt historik?")) {
+            localStorage.removeItem('esp_history');
+            location.reload();
+        }
+    }
+
+    // Kør hvert 30. sekund
+    setInterval(updateData, 30000);
+    updateData();
+</script>
 </body>
 </html>
