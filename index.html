@@ -3,113 +3,85 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP Home Monitor</title>
+    <title>ESP Temp Monitor</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2c3e50">
     <style>
-        :root {
-            --bg: #f0f2f5;
-            --card: #ffffff;
-            --primary: #3498db;
-            --text: #2c3e50;
-        }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-            background-color: var(--bg); 
-            color: var(--text);
-            margin: 0; padding: 20px;
-            display: flex; flex-direction: column; align-items: center;
-        }
+        :root { --bg: #f0f2f5; --card: #ffffff; --primary: #3498db; --text: #2c3e50; }
+        body { font-family: sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
         .container { width: 100%; max-width: 400px; }
-        h1 { font-size: 1.5rem; margin-bottom: 20px; text-align: center; }
-        
-        .status-badge {
-            font-size: 0.8rem; padding: 5px 12px; border-radius: 20px;
-            background: #dfe6e9; display: inline-block; margin-bottom: 20px;
-        }
-
-        #sensor-container { display: grid; gap: 15px; width: 100%; }
-        
-        .card {
-            background: var(--card); padding: 20px; border-radius: 15px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-            display: flex; justify-content: space-between; align-items: center;
-        }
-        .card .name { font-weight: bold; font-size: 1.1rem; }
-        .card .value { font-size: 1.5rem; color: var(--primary); font-weight: 900; }
-
-        button {
-            width: 100%; background: var(--primary); color: white; border: none;
-            padding: 15px; border-radius: 12px; font-size: 1rem; font-weight: bold;
-            margin-top: 30px; cursor: pointer; transition: transform 0.1s;
-        }
-        button:active { transform: scale(0.98); }
-        
-        .footer { margin-top: 20px; font-size: 0.7rem; color: #95a5a6; }
+        h1 { font-size: 1.5rem; text-align: center; margin-bottom: 10px; }
+        .status-badge { font-size: 0.8rem; padding: 5px 12px; border-radius: 20px; background: #dfe6e9; display: inline-block; margin-bottom: 20px; }
+        #sensor-container { display: grid; gap: 10px; width: 100%; }
+        .card { background: var(--card); padding: 15px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
+        .card .name { font-weight: bold; }
+        .card .value { font-size: 1.2rem; color: var(--primary); font-weight: bold; }
+        button { width: 100%; background: var(--primary); color: white; border: none; padding: 15px; border-radius: 12px; font-size: 1rem; font-weight: bold; margin-top: 20px; cursor: pointer; }
+        .footer { margin-top: 20px; font-size: 0.7rem; color: #95a5a6; text-align: center; }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <h1>Temperatur Monitor</h1>
-        <center><div id="status" class="status-badge">Klar til hentning</div></center>
+        <h1>Termometer Panel</h1>
+        <center><div id="status" class="status-badge">Klar</div></center>
 
         <div id="sensor-container">
-            <div class="card">
-                <span class="name">Ingen data</span>
-                <span class="value">--</span>
             </div>
-        </div>
 
-        <button onclick="fetchTemperature()">Opdater nu</button>
-        
-        <center><div class="footer">Forbundet til: 192.168.1.66</div></center>
+        <button onclick="fetchAllSensors()">Opdater Temperaturer</button>
+        <div class="footer">Enhed: 192.168.1.66 (DS18B20 Array)</div>
     </div>
 
     <script>
-        async function fetchTemperature() {
+        // Liste over dine sensor ID'er (ESPHome v1 format)
+        const sensorIds = ['ds18b20-1', 'ds18b20-2', 'ds18b20-3', 'ds18b20-4', 'ds18b20-5'];
+        const espIp = '192.168.1.66';
+
+        async function fetchAllSensors() {
             const statusEl = document.getElementById('status');
             const container = document.getElementById('sensor-container');
             
-            statusEl.innerText = "Henter data...";
+            statusEl.innerText = "Henter...";
             statusEl.style.background = "#ffeaa7";
 
-            try {
-                // Vi tilføjer en 'mode: no-cors' eller sikrer os at ESP svarer. 
-                // Da ESPHome webserver normalt tillader CORS, bruger vi standard fetch:
-                const response = await fetch('http://192.168.1.66/json');
-                if (!response.ok) throw new Error('Kunne ikke nå ESP');
-                
-                const data = await response.json();
-                
-                // Tøm containeren
-                container.innerHTML = "";
-                
-                // Filtrer og vis kun sensorer
-                data.sensors.forEach(sensor => {
-                    const card = document.createElement('div');
-                    card.className = 'card';
-                    card.innerHTML = `
-                        <span class="name">${sensor.name}</span>
-                        <span class="value">${sensor.value}${sensor.unit}</span>
-                    `;
-                    container.appendChild(card);
-                });
+            // Vi tømmer ikke containeren hver gang for at undgå "blink", 
+            // men vi gemmer resultaterne i et midlertidigt objekt
+            let htmlBuffer = "";
 
+            for (const id of sensorIds) {
+                try {
+                    // Vi kalder hver sensor-sti direkte
+                    const response = await fetch(`http://${espIp}/sensor/${id}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        htmlBuffer += `
+                            <div class="card">
+                                <span class="name">Sensor ${id.split('-')[1]}</span>
+                                <span class="value">${data.value} °C</span>
+                            </div>
+                        `;
+                    }
+                } catch (error) {
+                    console.error("Kunne ikke hente " + id, error);
+                }
+            }
+
+            if (htmlBuffer === "") {
+                statusEl.innerText = "Fejl: Ingen data fundet";
+                statusEl.style.background = "#ff7675";
+                container.innerHTML = "<p style='text-align:center'>Tjek 'Mixed Content' i browseren</p>";
+            } else {
+                container.innerHTML = htmlBuffer;
                 statusEl.innerText = "Opdateret: " + new Date().toLocaleTimeString('da-DK');
                 statusEl.style.background = "#55efc4";
-
-            } catch (error) {
-                statusEl.innerText = "Fejl: Tjek WiFi / Mixed Content";
-                statusEl.style.background = "#ff7675";
-                console.error(error);
             }
         }
 
-        // Kør automatisk ved start
-        window.onload = fetchTemperature;
+        // Start ved indlæsning
+        window.onload = fetchAllSensors;
 
-        // Registrer Service Worker
+        // PWA Service Worker
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js');
         }
