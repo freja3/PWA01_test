@@ -3,6 +3,82 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP Temp Monitor</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        :root { --bg: #f0f2f5; --card: #ffffff; --primary: #3498db; --text: #2c3e50; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .container { width: 100%; max-width: 400px; }
+        h1 { font-size: 1.5rem; text-align: center; }
+        .status-badge { font-size: 0.8rem; padding: 5px 12px; border-radius: 20px; background: #dfe6e9; display: inline-block; margin-bottom: 20px; }
+        #sensor-container { display: grid; gap: 10px; width: 100%; }
+        .card { background: var(--card); padding: 15px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
+        .card .name { font-weight: bold; }
+        .card .value { font-size: 1.2rem; color: var(--primary); font-weight: bold; }
+        button { width: 100%; background: var(--primary); color: white; border: none; padding: 15px; border-radius: 12px; font-size: 1rem; font-weight: bold; margin-top: 20px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Termometer Panel</h1>
+        <center><div id="status" class="status-badge">Klar</div></center>
+
+        <div id="sensor-container"></div>
+
+        <button onclick="fetchAllSensors()">Opdater Temperaturer</button>
+    </div>
+
+    <script>
+        // Her bruger vi de præcise navne fra din YAML (Store bogstaver + bindestreg)
+        const sensorNames = ['DS18B20-1', 'DS18B20-2', 'DS18B20-3', 'DS18B20-4', 'DS18B20-5'];
+        const espIp = '192.168.1.66';
+
+        async function fetchAllSensors() {
+            const statusEl = document.getElementById('status');
+            const container = document.getElementById('sensor-container');
+            
+            statusEl.innerText = "Henter...";
+            let htmlBuffer = "";
+
+            for (const name of sensorNames) {
+                try {
+                    // Vi bruger encodeURIComponent for at sikre at navnet håndteres korrekt i URL'en
+                    const response = await fetch(`http://${espIp}/sensor/${encodeURIComponent(name)}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        htmlBuffer += `
+                            <div class="card">
+                                <span class="name">${name}</span>
+                                <span class="value">${data.value} °C</span>
+                            </div>
+                        `;
+                    }
+                } catch (error) {
+                    console.error("Fejl ved " + name, error);
+                }
+            }
+
+            if (htmlBuffer === "") {
+                statusEl.innerText = "Fejl: Ingen data fundet";
+            } else {
+                container.innerHTML = htmlBuffer;
+                statusEl.innerText = "Opdateret: " + new Date().toLocaleTimeString('da-DK');
+            }
+        }
+
+        window.onload = fetchAllSensors;
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
+</body>
+</html><!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP Pro Monitor</title>
     <link rel="manifest" href="manifest.json">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
