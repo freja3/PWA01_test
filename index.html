@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP Pro Monitor v2</title>
+    <title>ESP Nerd Stats v1</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --primary: #38bdf8; --text: #f8fafc; }
@@ -11,26 +11,28 @@
         .container { width: 100%; max-width: 600px; margin: 0 auto; }
         .status-badge { font-size: 0.7rem; padding: 4px 10px; border-radius: 10px; background: #334155; margin-bottom: 15px; display: inline-block; }
         
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 20px; }
-        .card { background: var(--card); padding: 12px; border-radius: 12px; border: 1px solid #334155; text-align: center; }
-        .card .label { font-size: 0.7rem; color: #94a3b8; display: block; }
-        .card .val { font-size: 1.2rem; font-weight: bold; color: var(--primary); }
+        /* De små kort øverst */
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin-bottom: 20px; }
+        .card { background: var(--card); padding: 10px; border-radius: 12px; border: 1px solid #334155; text-align: center; }
+        .card .val { font-size: 1.1rem; font-weight: bold; color: var(--primary); }
         
-        .chart-container { background: var(--card); padding: 15px; border-radius: 12px; margin-bottom: 20px; height: 300px; border: 1px solid #334155; }
+        /* Graffeltet */
+        .chart-container { background: var(--card); padding: 15px; border-radius: 12px; margin-bottom: 20px; height: 250px; border: 1px solid #334155; }
         
-        .nerd-box { background: #000; padding: 10px; border-radius: 8px; font-family: monospace; font-size: 0.7rem; color: #4ade80; overflow-x: auto; }
+        /* Tabellen med Nørd-stats */
+        .nerd-box { background: #000; padding: 10px; border-radius: 8px; font-family: monospace; font-size: 0.75rem; color: #4ade80; overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; }
         th { text-align: left; color: #94a3b8; border-bottom: 1px solid #334155; padding: 5px; }
-        td { padding: 5px; border-bottom: 1px solid #1e293b; }
+        td { padding: 5px; border-bottom: 1px solid #111; }
         
-        button { width: 100%; background: var(--primary); color: #0f172a; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-bottom: 10px; }
+        button { width: 100%; background: var(--primary); color: #0f172a; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 10px; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <div style="text-align: center;">
-        <div id="status" class="status-badge">Initialiserer system...</div>
+        <div id="status" class="status-badge">Forbinder til sensorer...</div>
     </div>
 
     <div class="grid" id="live-cards"></div>
@@ -39,35 +41,36 @@
         <canvas id="tempChart"></canvas>
     </div>
 
-    <button onclick="updateData()">Opdater Manuelt</button>
-    <button onclick="clearHistory()" style="background: #ef4444; font-size: 0.7rem; padding: 5px;">Nulstil Historik</button>
+    <button onclick="updateData()">Opdater nu</button>
 
+    <h3 style="font-size: 0.9rem; margin: 15px 0 5px 0;">Nørd Statistik (Live Session)</h3>
     <div class="nerd-box">
         <table>
-            <thead><tr><th>Sensor</th><th>Min</th><th>Max</th><th>Avg</th><th>Δ (Sving)</th></tr></thead>
+            <thead><tr><th>Sensor</th><th>Min</th><th>Max</th><th>Avg</th></tr></thead>
             <tbody id="nerd-body"></tbody>
         </table>
     </div>
 </div>
 
 <script>
+    // Konfiguration - SKAL matche 'name' i din ESPHome YAML
     const sensorNames = ['DS18B20-1', 'DS18B20-2', 'DS18B20-3', 'DS18B20-4', 'DS18B20-5'];
     const espIp = '192.168.1.66';
     
-    // Hent historik fra LocalStorage eller start forfra
-    let history = JSON.parse(localStorage.getItem('esp_history')) || {};
-    sensorNames.forEach(name => { if(!history[name]) history[name] = []; });
+    // Beholdere til data
+    let history = {};
+    sensorNames.forEach(name => history[name] = []);
 
-    // Chart.js Opsætning
+    // Initialisér diagrammet
     const ctx = document.getElementById('tempChart').getContext('2d');
     const chart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: Array.from({length: 30}, (_, i) => i),
+            labels: [],
             datasets: sensorNames.map((name, i) => ({
                 label: name,
-                data: history[name].map(p => p.v),
-                borderColor: `hsl(${i * 60}, 70%, 50%)`,
+                data: [],
+                borderColor: `hsl(${i * 65}, 70%, 55%)`,
                 borderWidth: 2,
                 pointRadius: 0,
                 tension: 0.3
@@ -76,71 +79,69 @@
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            scales: { 
+            scales: {
                 y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
                 x: { display: false }
             },
-            plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 10 } } }
+            plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 10, font: { size: 10 } } } }
         }
     });
 
     async function updateData() {
         const statusEl = document.getElementById('status');
-        const cardContainer = document.getElementById('live-cards');
-        const nerdBody = document.getElementById('nerd-body');
+        statusEl.innerText = "Henter...";
+        statusEl.style.background = "#334155";
         
-        statusEl.innerText = "Henter data...";
         let cardsHtml = "";
         let nerdHtml = "";
-        const timestamp = new Date().toLocaleTimeString();
+        const now = new Date().toLocaleTimeString('da-DK', {hour: '2-digit', minute:'2-digit', second:'2-digit'});
 
         for (const name of sensorNames) {
             try {
-                const res = await fetch(`http://${espIp}/sensor/${encodeURIComponent(name)}`);
+                // Vi henter data direkte fra hver sensor
+                const res = await fetch(`http://${espIp}/sensor/${name}`);
+                if (!res.ok) throw new Error();
+                
                 const data = await res.json();
                 const val = parseFloat(data.value);
 
                 if (!isNaN(val)) {
-                    // Gem data
-                    history[name].push({ t: timestamp, v: val });
-                    if (history[name].length > 100) history[name].shift(); // Behold de sidste 100
+                    // Gem til historik (kun i denne session)
+                    history[name].push(val);
+                    if (history[name].length > 30) history[name].shift();
 
                     // Beregn Stats
-                    const vals = history[name].map(p => p.v);
-                    const min = Math.min(...vals).toFixed(1);
-                    const max = Math.max(...vals).toFixed(1);
-                    const avg = (vals.reduce((a,b) => a+b, 0) / vals.length).toFixed(1);
-                    const diff = (max - min).toFixed(1);
+                    const min = Math.min(...history[name]).toFixed(1);
+                    const max = Math.max(...history[name]).toFixed(1);
+                    const avg = (history[name].reduce((a,b) => a+b, 0) / history[name].length).toFixed(1);
 
-                    cardsHtml += `<div class="card"><span class="label">${name}</span><span class="val">${val}°</span></div>`;
-                    nerdHtml += `<tr><td>${name}</td><td>${min}°</td><td>${max}°</td><td>${avg}°</td><td>${diff}°</td></tr>`;
+                    cardsHtml += `<div class="card"><span style="font-size:0.6rem; color:#94a3b8">${name}</span><br><span class="val">${val}°</span></div>`;
+                    nerdHtml += `<tr><td>${name}</td><td>${min}°</td><td>${max}°</td><td>${avg}°</td></tr>`;
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) {
+                console.log("Kunne ikke hente " + name);
+            }
         }
 
-        // Gem til telefonens hukommelse
-        localStorage.setItem('esp_history', JSON.stringify(history));
+        // Opdater graf-labels
+        chart.data.labels.push(now);
+        if (chart.data.labels.length > 30) chart.data.labels.shift();
 
-        // Opdater Graf
+        // Opdater hver linje i grafen
         sensorNames.forEach((name, i) => {
-            chart.data.datasets[i].data = history[name].map(p => p.v);
+            chart.data.datasets[i].data = history[name];
         });
-        chart.update('none');
 
-        cardContainer.innerHTML = cardsHtml;
-        nerdBody.innerHTML = nerdHtml;
-        statusEl.innerText = "Live: " + timestamp;
-    }
-
-    function clearHistory() {
-        if(confirm("Vil du slette gemt historik?")) {
-            localStorage.removeItem('esp_history');
-            location.reload();
-        }
+        chart.update();
+        document.getElementById('live-cards').innerHTML = cardsHtml;
+        document.getElementById('nerd-body').innerHTML = nerdHtml;
+        statusEl.innerText = "Sidst opdateret: " + now;
+        statusEl.style.background = "#065f46"; // Grønlig når det virker
     }
 
     // Kør hvert 30. sekund
     setInterval(updateData, 30000);
+    // Kør første gang med det samme
     updateData();
 </script>
 </body>
